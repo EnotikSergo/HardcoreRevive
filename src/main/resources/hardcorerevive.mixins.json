@@ -1,0 +1,22 @@
+{
+  "required": true,
+  "package": "com.enotiksergo.hardcorerevive.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "BlockOnPlacedMixin",
+    "LevelPropertiesAccessor",
+    "ScreenAccessor",
+    "ServerChunkLoadingManagerAccessor",
+    "ServerChunkManagerAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "overwrites": {
+    "requireAnnotations": true
+  },
+  "client": [
+    "ClientWorldPropertiesMixin",
+    "DeathScreenMixin"
+  ]
+}

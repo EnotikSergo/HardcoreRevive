@@ -1,0 +1,40 @@
+{
+	"schemaVersion": 1,
+	"id": "hardcorerevive",
+	"version": "${version}",
+	"name": "hardcorerevive",
+	"description": "It allows you to be revive in the hardcore world after death, but it comes at a price.",
+	"authors": [
+		"EnotikSergo"
+	],
+	"contact": {
+		"homepage": "",
+		"sources": ""
+	},
+	"license": "CC0-1.0",
+	"icon": "assets/hardcorerevive/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.enotiksergo.hardcorerevive.HardcoreReviveMod"
+		],
+		"client": [
+			"com.enotiksergo.hardcorerevive.client.HardcoreReviveClient"
+    	],
+    	"modmenu": [
+    		"com.enotiksergo.hardcorerevive.config.ModMenuIntegration"
+    	]
+	},
+	"mixins": [
+		"hardcorerevive.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.17.3",
+		"minecraft": "~1.21.10",
+		"java": ">=21",
+		"fabric-api": "*"
+	},
+	"suggests": {
+		"another-mod": "*"
+	}
+}
