@@ -5,21 +5,23 @@ import com.enotiksergo.hardcorerevive.HardcoreHeartsFx;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.packet.CustomPayload;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload.Type;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.server.world.ServerWorld;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.server.level.ServerLevel;
 
 public final class ReviveNetworking {
 
     public static void registerPayloads() {
-        PayloadTypeRegistry.playC2S().register(ReviveRequestC2S.ID, ReviveRequestC2S.CODEC);
-        PayloadTypeRegistry.playC2S().register(ReadyAfterTerrainC2S.ID, ReadyAfterTerrainC2S.CODEC);
-        PayloadTypeRegistry.playS2C().register(FxBeginS2C.ID, FxBeginS2C.CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(ReviveRequestC2S.ID, ReviveRequestC2S.CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(ReadyAfterTerrainC2S.ID, ReadyAfterTerrainC2S.CODEC);
+        PayloadTypeRegistry.clientboundPlay().register(FxBeginS2C.ID, FxBeginS2C.CODEC);
     }
 
     public static void registerServerReceivers() {
@@ -27,12 +29,12 @@ public final class ReviveNetworking {
             var server = context.server();
             var player = context.player();
             server.execute(() -> {
-                com.enotiksergo.hardcorerevive.util.ReviveCoordinator.markWaiting(player.getUuid());
+                com.enotiksergo.hardcorerevive.util.ReviveCoordinator.markWaiting(player.getUUID());
 
                 server.execute(() -> {
-                    ServerWorld world = player.getEntityWorld();
-                    ChunkPos cpos = new ChunkPos(player.getBlockPos());
-                    com.enotiksergo.hardcorerevive.util.ReviveCoordinator.addPreload(world, cpos, player.getUuid());
+                    ServerLevel world = player.level();
+                    ChunkPos cpos = ChunkPos.containing(player.blockPosition());
+                    com.enotiksergo.hardcorerevive.util.ReviveCoordinator.addPreload(world, cpos, player.getUUID());
                 });
             });
         });
@@ -42,7 +44,7 @@ public final class ReviveNetworking {
             var player = context.player();
             server.execute(() -> {
                 finalizeRevive(server, player);
-                com.enotiksergo.hardcorerevive.util.ReviveCoordinator.removePreload(server, player.getUuid());
+                com.enotiksergo.hardcorerevive.util.ReviveCoordinator.removePreload(server, player.getUUID());
             });
         });
     }
@@ -63,42 +65,42 @@ public final class ReviveNetworking {
         ClientPlayNetworking.send(new ReadyAfterTerrainC2S());
     }
 
-    private static void finalizeRevive(MinecraftServer server, ServerPlayerEntity player) {
-        if (!com.enotiksergo.hardcorerevive.util.ReviveCoordinator.consumeWaiting(player.getUuid())) return;
+    private static void finalizeRevive(MinecraftServer server, ServerPlayer player) {
+        if (!com.enotiksergo.hardcorerevive.util.ReviveCoordinator.consumeWaiting(player.getUUID())) return;
 
         boolean converted = HardcodeDisabler.disableHardcore(server);
-        player.changeGameMode(net.minecraft.world.GameMode.SURVIVAL);
+        player.setGameMode(net.minecraft.world.level.GameType.SURVIVAL);
 
         if (converted) {
-            player.sendMessage(net.minecraft.text.Text.translatable("hardcorerevive.chat.revive"), false);
-            HardcodeDisabler.notifyPlayerConverted(server, player.getUuid());
+            player.sendSystemMessage(Component.translatable("hardcorerevive.chat.revive"));
+            HardcodeDisabler.notifyPlayerConverted(server, player.getUUID());
         }
 
         net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player, new FxBeginS2C());
     }
 
-    public record ReviveRequestC2S() implements CustomPayload {
-        public static final Id<ReviveRequestC2S> ID =
-                new Id<>(Identifier.of("hardcorerevive", "revive_request"));
-        public static final PacketCodec<RegistryByteBuf, ReviveRequestC2S> CODEC =
-                PacketCodec.of((buf, payload) -> {}, buf -> new ReviveRequestC2S());
-        @Override public Id<? extends CustomPayload> getId() { return ID; }
+    public record ReviveRequestC2S() implements CustomPacketPayload {
+        public static final Type<ReviveRequestC2S> ID =
+                new Type<>(Identifier.fromNamespaceAndPath("hardcorerevive", "revive_request"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, ReviveRequestC2S> CODEC =
+                StreamCodec.ofMember((buf, payload) -> {}, buf -> new ReviveRequestC2S());
+        @Override public Type<? extends CustomPacketPayload> type() { return ID; }
     }
 
-    public record ReadyAfterTerrainC2S() implements CustomPayload {
-        public static final Id<ReadyAfterTerrainC2S> ID =
-                new Id<>(Identifier.of("hardcorerevive", "ready_after_terrain"));
-        public static final PacketCodec<RegistryByteBuf, ReadyAfterTerrainC2S> CODEC =
-                PacketCodec.of((buf, payload) -> {}, buf -> new ReadyAfterTerrainC2S());
-        @Override public Id<? extends CustomPayload> getId() { return ID; }
+    public record ReadyAfterTerrainC2S() implements CustomPacketPayload {
+        public static final Type<ReadyAfterTerrainC2S> ID =
+                new Type<>(Identifier.fromNamespaceAndPath("hardcorerevive", "ready_after_terrain"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, ReadyAfterTerrainC2S> CODEC =
+                StreamCodec.ofMember((buf, payload) -> {}, buf -> new ReadyAfterTerrainC2S());
+        @Override public Type<? extends CustomPacketPayload> type() { return ID; }
     }
 
-    public record FxBeginS2C() implements CustomPayload {
-        public static final Id<FxBeginS2C> ID =
-                new Id<>(Identifier.of("hardcorerevive", "fx_begin"));
-        public static final PacketCodec<RegistryByteBuf, FxBeginS2C> CODEC =
-                PacketCodec.of((buf, payload) -> {}, buf -> new FxBeginS2C());
-        @Override public Id<? extends CustomPayload> getId() { return ID; }
+    public record FxBeginS2C() implements CustomPacketPayload {
+        public static final Type<FxBeginS2C> ID =
+                new Type<>(Identifier.fromNamespaceAndPath("hardcorerevive", "fx_begin"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, FxBeginS2C> CODEC =
+                StreamCodec.ofMember((buf, payload) -> {}, buf -> new FxBeginS2C());
+        @Override public Type<? extends CustomPacketPayload> type() { return ID; }
     }
 
     private static final class ServerToClient {

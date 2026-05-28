@@ -1,18 +1,22 @@
 package com.enotiksergo.hardcorerevive;
 
 import com.enotiksergo.hardcorerevive.config.HardcoreReviveConfig;
-import net.minecraft.entity.boss.BossBar;
-import net.minecraft.entity.boss.ServerBossBar;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.world.BossEvent;
+import net.minecraft.server.level.ServerBossEvent;
 import net.minecraft.nbt.*;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.text.Text;
-import net.minecraft.util.WorldSavePath;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.World;
-import net.minecraft.world.storage.*;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.chunk.storage.RegionFile;
+import net.minecraft.world.level.chunk.storage.RegionFileVersion;
+import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
+import net.minecraft.world.level.storage.LevelResource;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -20,10 +24,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -32,15 +33,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 public class RegionContainerCleaner {
-    public static void clearAllContainers(ServerWorld world, ServerCommandSource source, boolean showBossbar) {
+    public static void clearAllContainers(ServerLevel world, CommandSourceStack source, boolean showBossbar) {
         MinecraftServer server = world.getServer();
-        Path worldDir = server.getSavePath(WorldSavePath.ROOT);
+        Path worldDir = server.getWorldPath(LevelResource.ROOT);
 
         Path regionDir;
-        if (world.getRegistryKey().equals(World.OVERWORLD)) {
+        if (world.dimension().equals(Level.OVERWORLD)) {
             regionDir = worldDir.resolve("region");
         } else {
-            regionDir = worldDir.resolve(world.getRegistryKey().getValue().getPath()).resolve("region");
+            regionDir = worldDir.resolve(world.dimension().identifier().getPath()).resolve("region");
         }
         regionDir = regionDir.normalize();
 
@@ -50,18 +51,18 @@ public class RegionContainerCleaner {
         }
 
         System.out.println("[HardcoreRevive Cleaner] Clean Start: " + regionDir);
-        ServerBossBar bossBar = new ServerBossBar(Text.translatable("hardcorerevive.bossbar.clear"), BossBar.Color.YELLOW, BossBar.Style.PROGRESS);
+        ServerBossEvent bossBar = new ServerBossEvent(UUID.randomUUID(),Component.translatable("hardcorerevive.bossbar.clear"), BossEvent.BossBarColor.YELLOW, BossEvent.BossBarOverlay.PROGRESS);
 
         if (showBossbar) {
             server.execute(() -> {
-                for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+                for (ServerPlayer player : server.getPlayerList().getPlayers()) {
                     bossBar.addPlayer(player);
                 }
             });
         }
 
         Path finalRegionDir = regionDir;
-        Path logsDir = server.getPath("HardcoreReviveCleanLogs");
+        Path logsDir = server.getFile("HardcoreReviveCleanLogs");
         try {
             Files.createDirectories(logsDir);
         } catch (IOException e) {
@@ -72,13 +73,13 @@ public class RegionContainerCleaner {
         Path logFile = logsDir.resolve("clean_log_" + timestamp + ".txt");
         long startTime = System.currentTimeMillis();
         try {
-            String logContent = "[HardcoreRevive Cleaner] " + Text.translatable("hardcorerevive.logs.start").getString()
+            String logContent = "[HardcoreRevive Cleaner] " + Component.translatable("hardcorerevive.logs.start").getString()
                     + LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")) + System.lineSeparator();
             Files.writeString(logFile, logContent, StandardCharsets.UTF_8, StandardOpenOption.CREATE);
         } catch (IOException e) {
             System.err.println("[HardcoreRevive Cleaner] Failed to create a log file: " + e.getMessage());
         }
-        server.saveAll(true, true, true);
+        server.saveEverything(true, true, true);
         CompletableFuture.runAsync(() -> {
             AtomicInteger clearedCount = new AtomicInteger();
 
@@ -97,8 +98,8 @@ public class RegionContainerCleaner {
                     CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                         StringBuilder localLog = new StringBuilder();
                         try {
-                            bossBar.setName(Text.translatable("hardcorerevive.bossbar.region").append(Text.literal(regionPath.getFileName().toString())).append(" §a[§f" + finalI.getAndIncrement() + "§a/§f" + totalRegions + "§a]§f"));
-                            bossBar.setPercent((float) regionIndex / totalRegions);
+                            bossBar.setName(Component.translatable("hardcorerevive.bossbar.region").append(Component.literal(regionPath.getFileName().toString())).append(" §a[§f" + finalI.getAndIncrement() + "§a/§f" + totalRegions + "§a]§f"));
+                            bossBar.setProgress((float) regionIndex / totalRegions);
                             cleanRegion(regionPath, world, clearedCount, localLog);
                             synchronized (RegionContainerCleaner.class) {
                                 Files.writeString(logFile, localLog.toString(), StandardCharsets.UTF_8, StandardOpenOption.APPEND);
@@ -132,8 +133,8 @@ public class RegionContainerCleaner {
                         CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                             StringBuilder localLog = new StringBuilder();
                             try {
-                                bossBar.setName(Text.translatable("hardcorerevive.bossbar.region2").append(Text.literal(regionPath.getFileName().toString())).append(" §a[§f" + finalI.getAndIncrement() + "§a/§f" + totalRegions + "§a]§f"));
-                                bossBar.setPercent((float) regionIndex / totalRegions);
+                                bossBar.setName(Component.translatable("hardcorerevive.bossbar.region2").append(Component.literal(regionPath.getFileName().toString())).append(" §a[§f" + finalI.getAndIncrement() + "§a/§f" + totalRegions + "§a]§f"));
+                                bossBar.setProgress((float) regionIndex / totalRegions);
                                 cleanEntitiesRegion(regionPath, world, clearedCount, localLog);
                                 synchronized (RegionContainerCleaner.class) {
                                     Files.writeString(logFile, localLog.toString(), StandardCharsets.UTF_8, StandardOpenOption.APPEND);
@@ -156,21 +157,21 @@ public class RegionContainerCleaner {
 
             server.execute(() -> {
                 if (showBossbar) {
-                    bossBar.clearPlayers();
+                    bossBar.removeAllPlayers();
                 }
-                world.getChunkManager().save(true);
+                world.getChunkSource().save(true);
 
                 long elapsed = System.currentTimeMillis() - startTime;
                 String timeFormatted = formatElapsedTime(elapsed);
 
-                source.sendFeedback(() ->
-                        Text.translatable("hardcorerevive.chat.clear.end", clearedCount.get()), false);
+                source.sendSuccess(() ->
+                        Component.translatable("hardcorerevive.chat.clear.end", clearedCount.get()), false);
 
                 try {
                     String logContent = System.lineSeparator() +
-                            "[HardcoreRevive Cleaner] " + Text.translatable("hardcorerevive.logs.end2").getString() + clearedCount.get() + System.lineSeparator() +
-                            "[HardcoreRevive Cleaner] " + Text.translatable("hardcorerevive.logs.end").getString() + LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")) + System.lineSeparator() +
-                            "[HardcoreRevive Cleaner] " + Text.translatable("hardcorerevive.logs.time").getString() + timeFormatted + System.lineSeparator();
+                            "[HardcoreRevive Cleaner] " + Component.translatable("hardcorerevive.logs.end2").getString() + clearedCount.get() + System.lineSeparator() +
+                            "[HardcoreRevive Cleaner] " + Component.translatable("hardcorerevive.logs.end").getString() + LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")) + System.lineSeparator() +
+                            "[HardcoreRevive Cleaner] " + Component.translatable("hardcorerevive.logs.time").getString() + timeFormatted + System.lineSeparator();
 
                     Files.writeString(logFile, logContent, StandardCharsets.UTF_8, StandardOpenOption.APPEND);
                 } catch (IOException e) {
@@ -179,29 +180,30 @@ public class RegionContainerCleaner {
             });
         });
     }
-    public static void clearAllDimensions(ServerCommandSource source, boolean showBossbar) {
+    public static void clearAllDimensions(CommandSourceStack source, boolean showBossbar) {
         MinecraftServer server = source.getServer();
 
-        ServerBossBar bossBar = new ServerBossBar(
-                Text.translatable("hardcorerevive.bossbar.clear"),
-                BossBar.Color.YELLOW,
-                BossBar.Style.PROGRESS
+        ServerBossEvent bossBar = new ServerBossEvent(
+                UUID.randomUUID(),
+                Component.translatable("hardcorerevive.bossbar.clear"),
+                BossEvent.BossBarColor.YELLOW,
+                BossEvent.BossBarOverlay.PROGRESS
         );
         if (showBossbar) {
             server.execute(() -> {
-                for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+                for (ServerPlayer player : server.getPlayerList().getPlayers()) {
                     bossBar.addPlayer(player);
                 }
             });
         }
 
-        Path logsDir = server.getPath("HardcoreReviveCleanLogs");
+        Path logsDir = server.getFile("HardcoreReviveCleanLogs");
         try { Files.createDirectories(logsDir); } catch (IOException ignored) {}
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"));
         Path logFile = logsDir.resolve("clean_log_" + timestamp + ".txt");
         long startTime = System.currentTimeMillis();
         try {
-            String logContent = "[HardcoreRevive Cleaner] " + Text.translatable("hardcorerevive.logs.start").getString()
+            String logContent = "[HardcoreRevive Cleaner] " + Component.translatable("hardcorerevive.logs.start").getString()
                     + LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")) + System.lineSeparator();
             Files.writeString(logFile, logContent, StandardCharsets.UTF_8, StandardOpenOption.CREATE);
         } catch (IOException e) {
@@ -211,15 +213,15 @@ public class RegionContainerCleaner {
         CompletableFuture.runAsync(() -> {
             AtomicInteger clearedCount = new AtomicInteger();
 
-            List<ServerWorld> targets = new ArrayList<>();
-            ServerWorld overworld = server.getWorld(World.OVERWORLD);
-            ServerWorld nether    = server.getWorld(World.NETHER);
-            ServerWorld end       = server.getWorld(World.END);
+            List<ServerLevel> targets = new ArrayList<>();
+            ServerLevel overworld = server.getLevel(Level.OVERWORLD);
+            ServerLevel nether    = server.getLevel(Level.NETHER);
+            ServerLevel end       = server.getLevel(Level.END);
             if (overworld != null) targets.add(overworld);
             if (nether != null)    targets.add(nether);
             if (end != null)       targets.add(end);
 
-            for (ServerWorld w : targets) {
+            for (ServerLevel w : targets) {
                 Path regionDir = resolveRegionDir(server, w).normalize();
                 System.out.println("[HardcoreRevive Cleaner] Clean Start: " + regionDir);
 
@@ -230,7 +232,7 @@ public class RegionContainerCleaner {
 
                 try {
                     String head = System.lineSeparator() +
-                            "[HardcoreRevive Cleaner] === Dimension: " + w.getRegistryKey().getValue() + " ===" +
+                            "[HardcoreRevive Cleaner] === Dimension: " + w.dimension().identifier() + " ===" +
                             System.lineSeparator();
                     Files.writeString(logFile, head, StandardCharsets.UTF_8, StandardOpenOption.APPEND);
                 } catch (IOException ignored) {}
@@ -249,8 +251,8 @@ public class RegionContainerCleaner {
                         CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                             StringBuilder localLog = new StringBuilder();
                             try {
-                                bossBar.setName(Text.translatable("hardcorerevive.bossbar.region").append(Text.literal(w.getRegistryKey().getValue().toShortTranslationKey() + " ")).append(Text.literal(regionPath.getFileName().toString())).append(" §a[§f" + finalI.getAndIncrement() + "§a/§f" + totalRegions + "§a]§f"));
-                                bossBar.setPercent((float) regionIndex / totalRegions);
+                                bossBar.setName(Component.translatable("hardcorerevive.bossbar.region").append(Component.literal(w.dimension().identifier().toShortLanguageKey() + " ")).append(Component.literal(regionPath.getFileName().toString())).append(" §a[§f" + finalI.getAndIncrement() + "§a/§f" + totalRegions + "§a]§f"));
+                                bossBar.setProgress((float) regionIndex / totalRegions);
 
                                 cleanRegion(regionPath, w, clearedCount, localLog);
 
@@ -288,8 +290,8 @@ public class RegionContainerCleaner {
                             CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                                 StringBuilder localLog = new StringBuilder();
                                 try {
-                                    bossBar.setName(Text.translatable("hardcorerevive.bossbar.region2").append(Text.literal(w.getRegistryKey().getValue().toShortTranslationKey() + " ")).append(Text.literal(regionPath.getFileName().toString())).append(" §a[§f" + finalI.getAndIncrement() + "§a/§f" + totalRegions + "§a]§f"));
-                                    bossBar.setPercent((float) regionIndex / totalRegions);
+                                    bossBar.setName(Component.translatable("hardcorerevive.bossbar.region2").append(Component.literal(w.dimension().identifier().toShortLanguageKey() + " ")).append(Component.literal(regionPath.getFileName().toString())).append(" §a[§f" + finalI.getAndIncrement() + "§a/§f" + totalRegions + "§a]§f"));
+                                    bossBar.setProgress((float) regionIndex / totalRegions);
 
                                     cleanEntitiesRegion(regionPath, w, clearedCount, localLog);
 
@@ -313,25 +315,25 @@ public class RegionContainerCleaner {
                     System.out.println("[HardcoreRevive Cleaner] Entities directory not found: " + entitiesDir);
                 }
 
-                server.execute(() -> w.getChunkManager().save(true));
+                server.execute(() -> w.getChunkSource().save(true));
             }
 
             server.execute(() -> {
                 if (showBossbar) {
-                    bossBar.clearPlayers();
+                    bossBar.removeAllPlayers();
                 }
 
                 long elapsed = System.currentTimeMillis() - startTime;
                 String timeFormatted = formatElapsedTime(elapsed);
 
-                source.sendFeedback(() ->
-                        Text.translatable("hardcorerevive.chat.clear.end", clearedCount.get()), false);
+                source.sendSuccess(() ->
+                        Component.translatable("hardcorerevive.chat.clear.end", clearedCount.get()), false);
 
                 try {
                     String logContent = System.lineSeparator() +
-                            "[HardcoreRevive Cleaner] " + Text.translatable("hardcorerevive.logs.end2").getString() + clearedCount.get() + System.lineSeparator() +
-                            "[HardcoreRevive Cleaner] " + Text.translatable("hardcorerevive.logs.end").getString() + LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")) + System.lineSeparator() +
-                            "[HardcoreRevive Cleaner] " + Text.translatable("hardcorerevive.logs.time").getString() + timeFormatted + System.lineSeparator();
+                            "[HardcoreRevive Cleaner] " + Component.translatable("hardcorerevive.logs.end2").getString() + clearedCount.get() + System.lineSeparator() +
+                            "[HardcoreRevive Cleaner] " + Component.translatable("hardcorerevive.logs.end").getString() + LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")) + System.lineSeparator() +
+                            "[HardcoreRevive Cleaner] " + Component.translatable("hardcorerevive.logs.time").getString() + timeFormatted + System.lineSeparator();
 
                     Files.writeString(logFile, logContent, StandardCharsets.UTF_8, StandardOpenOption.APPEND);
                 } catch (IOException e) {
@@ -341,7 +343,7 @@ public class RegionContainerCleaner {
         });
     }
 
-    private static void cleanRegion(Path regionPath, ServerWorld world, AtomicInteger clearedCount, StringBuilder logBuffer) throws IOException {
+    private static void cleanRegion(Path regionPath, ServerLevel world, AtomicInteger clearedCount, StringBuilder logBuffer) throws IOException {
         String fileName = regionPath.getFileName().toString();
         String[] parts = fileName.replace("r.", "").replace(".mca", "").split("\\.");
         int regionX = Integer.parseInt(parts[0]);
@@ -359,10 +361,10 @@ public class RegionContainerCleaner {
         final boolean CLEAN_SHELF = cfg.cleanShelf;
         final boolean CLEAN_CHISELED_BOOKSHELF = cfg.cleanChiseled_bookshelf;
 
-        StorageKey storageKey = new StorageKey("region", world.getRegistryKey(), "region");
+        RegionStorageInfo storageKey = new RegionStorageInfo("region", world.dimension(), "region");
         Path regionDir = regionPath.getParent();
 
-        try (RegionFile regionFile = new RegionFile(storageKey, regionPath, regionDir, ChunkCompressionFormat.DEFLATE, true)) {
+        try (RegionFile regionFile = new RegionFile(storageKey, regionPath, regionDir, RegionFileVersion.VERSION_DEFLATE, true)) {
 
             for (int localX = 0; localX < 32; localX++) {
                 for (int localZ = 0; localZ < 32; localZ++) {
@@ -371,10 +373,10 @@ public class RegionContainerCleaner {
 
                     ChunkPos pos = new ChunkPos(chunkX, chunkZ);
 
-                    if (world.isChunkLoaded(pos.x, pos.z)) continue;
+                    if (world.hasChunk(pos.x(), pos.z())) continue;
                     if (!regionFile.hasChunk(pos)) continue;
 
-                    try (DataInputStream input = regionFile.getChunkInputStream(pos)) {
+                    try (DataInputStream input = regionFile.getChunkDataInputStream(pos)) {
                         if (input == null) continue;
 
                         Path tempFile = Files.createTempFile("chunk", ".nbt");
@@ -383,7 +385,7 @@ public class RegionContainerCleaner {
                                 input.transferTo(out);
                             }
 
-                            NbtCompound nbt = NbtIo.read(tempFile);
+                            CompoundTag nbt = NbtIo.read(tempFile);
                             if (nbt == null) continue;
                             AtomicBoolean modified = new AtomicBoolean(false);
 
@@ -438,8 +440,8 @@ public class RegionContainerCleaner {
                                 }
                             });
                             if (modified.get()) {
-                                try (DataOutputStream out = regionFile.getChunkOutputStream(pos)) {
-                                    NbtIo.write(nbt, out);
+                                try (DataOutputStream out = regionFile.getChunkDataOutputStream(pos)) {
+                                    NbtIo.writeUnnamedTagWithFallback(nbt, out);
                                 }
                             }
                         } finally {
@@ -453,7 +455,7 @@ public class RegionContainerCleaner {
         }
     }
 
-    private static void cleanEntitiesRegion(Path regionPath, ServerWorld world, AtomicInteger clearedCount, StringBuilder logBuffer) throws IOException {
+    private static void cleanEntitiesRegion(Path regionPath, ServerLevel world, AtomicInteger clearedCount, StringBuilder logBuffer) throws IOException {
         String fileName = regionPath.getFileName().toString();
         String[] parts = fileName.replace("r.", "").replace(".mca", "").split("\\.");
         int regionX = Integer.parseInt(parts[0]);
@@ -469,10 +471,10 @@ public class RegionContainerCleaner {
         final boolean CLEAN_FRAMES = cfg.cleanItemFrames;
         final boolean CLEAN_ARMOR_STANDS = cfg.cleanArmorStands;
 
-        StorageKey storageKey = new StorageKey("entities", world.getRegistryKey(), "entities");
+        RegionStorageInfo storageKey = new RegionStorageInfo("entities", world.dimension(), "entities");
         Path entitiesDir = regionPath.getParent();
 
-        try (RegionFile regionFile = new RegionFile(storageKey, regionPath, entitiesDir, ChunkCompressionFormat.DEFLATE, true)) {
+        try (RegionFile regionFile = new RegionFile(storageKey, regionPath, entitiesDir, RegionFileVersion.VERSION_DEFLATE, true)) {
 
             for (int localX = 0; localX < 32; localX++) {
                 for (int localZ = 0; localZ < 32; localZ++) {
@@ -481,10 +483,10 @@ public class RegionContainerCleaner {
 
                     ChunkPos pos = new ChunkPos(chunkX, chunkZ);
 
-                    if (world.isChunkLoaded(pos.x, pos.z)) continue;
+                    if (world.hasChunk(pos.x(), pos.z())) continue;
                     if (!regionFile.hasChunk(pos)) continue;
 
-                    try (DataInputStream input = regionFile.getChunkInputStream(pos)) {
+                    try (DataInputStream input = regionFile.getChunkDataInputStream(pos)) {
                         if (input == null) continue;
 
                         Path tempFile = Files.createTempFile("entities_chunk", ".nbt");
@@ -493,12 +495,12 @@ public class RegionContainerCleaner {
                                 input.transferTo(out);
                             }
 
-                            NbtCompound nbt = NbtIo.read(tempFile);
+                            CompoundTag nbt = NbtIo.read(tempFile);
                             if (nbt == null) continue;
 
                             AtomicBoolean modified = new AtomicBoolean(false);
 
-                            java.util.function.Consumer<NbtList> cleaner = (entities) -> {
+                            java.util.function.Consumer<ListTag> cleaner = (entities) -> {
                                 for (int i = 0; i < entities.size(); i++) {
                                     entities.getCompound(i).ifPresent(e -> {
                                         String id = e.getString("id").orElse("unknown");
@@ -615,8 +617,8 @@ public class RegionContainerCleaner {
                             nbt.getList("Entities").ifPresent(cleaner);
 
                             if (modified.get()) {
-                                try (DataOutputStream out = regionFile.getChunkOutputStream(pos)) {
-                                    NbtIo.write(nbt, out);
+                                try (DataOutputStream out = regionFile.getChunkDataOutputStream(pos)) {
+                                    NbtIo.writeUnnamedTagWithFallback(nbt, out);
                                 }
                             }
 
@@ -662,22 +664,22 @@ public class RegionContainerCleaner {
             return String.format("%d s", seconds);
         }
     }
-    private static Path resolveRegionDir(MinecraftServer server, ServerWorld world) {
-        Path root = server.getSavePath(WorldSavePath.ROOT);
+    private static Path resolveRegionDir(MinecraftServer server, ServerLevel world) {
+        Path root = server.getWorldPath(LevelResource.ROOT);
 
-        if (world.getRegistryKey().equals(World.OVERWORLD)) {
+        if (world.dimension().equals(Level.OVERWORLD)) {
             Path p = root.resolve("region");
             if (Files.isDirectory(p)) return p;
         }
 
-        var id = world.getRegistryKey().getValue();
+        var id = world.dimension().identifier();
         Path modern = root.resolve("dimensions").resolve(id.getNamespace()).resolve(id.getPath()).resolve("region");
         if (Files.isDirectory(modern)) return modern;
 
-        if (world.getRegistryKey().equals(World.NETHER)) {
+        if (world.dimension().equals(Level.NETHER)) {
             Path p = root.resolve("DIM-1").resolve("region");
             if (Files.isDirectory(p)) return p;
-        } else if (world.getRegistryKey().equals(World.END)) {
+        } else if (world.dimension().equals(Level.END)) {
             Path p = root.resolve("DIM1").resolve("region");
             if (Files.isDirectory(p)) return p;
         }
@@ -685,12 +687,12 @@ public class RegionContainerCleaner {
         return root.resolve(id.getPath()).resolve("region");
     }
 
-    private static boolean regionHasLoadedChunks(ServerWorld world, int regionX, int regionZ) {
+    private static boolean regionHasLoadedChunks(ServerLevel world, int regionX, int regionZ) {
         for (int lx = 0; lx < 32; lx++) {
             for (int lz = 0; lz < 32; lz++) {
                 int cx = (regionX << 5) + lx;
                 int cz = (regionZ << 5) + lz;
-                if (world.isChunkLoaded(cx, cz)) return true;
+                if (world.hasChunk(cx, cz)) return true;
             }
         }
         return false;

@@ -2,15 +2,15 @@ package com.enotiksergo.hardcorerevive;
 
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gl.RenderPipelines;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.render.RenderTickCounter;
-import net.minecraft.sound.SoundEvents;
-import net.minecraft.util.Identifier;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.DeltaTracker;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.resources.Identifier;
 import net.minecraft.util.Util;
-import net.minecraft.util.math.ColorHelper;
-import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.ARGB;
+import net.minecraft.util.Mth;
 import java.util.BitSet;
 
 public final class HardcoreHeartsFx {
@@ -27,12 +27,12 @@ public final class HardcoreHeartsFx {
     private static final float LATE_WINDOW  = 0.30f;
     private static final float LATE_AMP     = 0.12f;
 
-    private static final Identifier HUD_ID = Identifier.of("hardcorerevive", "hearts_wave_xfade");
+    private static final Identifier HUD_ID = Identifier.fromNamespaceAndPath("hardcorerevive", "hearts_wave_xfade");
 
-    private static final Identifier TEX_FULL = Identifier.of("minecraft", "textures/gui/sprites/hud/heart/full.png");
-    private static final Identifier TEX_HALF = Identifier.of("minecraft", "textures/gui/sprites/hud/heart/half.png");
-    private static final Identifier TEX_HC_FULL = Identifier.of("minecraft", "textures/gui/sprites/hud/heart/hardcore_full.png");
-    private static final Identifier TEX_HC_HALF = Identifier.of("minecraft", "textures/gui/sprites/hud/heart/hardcore_half.png");
+    private static final Identifier TEX_FULL    = Identifier.fromNamespaceAndPath("minecraft", "textures/gui/sprites/hud/heart/full.png");
+    private static final Identifier TEX_HALF    = Identifier.fromNamespaceAndPath("minecraft", "textures/gui/sprites/hud/heart/half.png");
+    private static final Identifier TEX_HC_FULL = Identifier.fromNamespaceAndPath("minecraft", "textures/gui/sprites/hud/heart/hardcore_full.png");
+    private static final Identifier TEX_HC_HALF = Identifier.fromNamespaceAndPath("minecraft", "textures/gui/sprites/hud/heart/hardcore_half.png");
 
     private static volatile long startMs = -1L;
     private static volatile boolean active = false;
@@ -40,25 +40,27 @@ public final class HardcoreHeartsFx {
     private static volatile long finishAtMs = 0L;
     private static final BitSet popPlayed = new BitSet();
 
+    private static volatile boolean hudAttached = false;
+
     public static void register() {
-        HudElementRegistry.attachElementBefore(VanillaHudElements.CHAT, HUD_ID, HardcoreHeartsFx::render);
+        ensureAttached();
     }
 
     public static void begin() {
-        var mc = MinecraftClient.getInstance();
+        var mc = Minecraft.getInstance();
         if (mc == null) return;
 
         mc.execute(() -> {
             ensureAttached();
 
-            startMs = Util.getMeasuringTimeMs();
+            startMs = Util.getMillis();
             active = true;
 
             popPlayed.clear();
 
             int heartsNow = 10;
             var p = mc.player;
-            if (p != null) heartsNow = Math.max(1, MathHelper.ceil(p.getHealth() / 2f));
+            if (p != null) heartsNow = Math.max(1, Mth.ceil(p.getHealth() / 2f));
             plannedHearts = heartsNow;
 
             long tail = (plannedHearts > 0 ? (plannedHearts - 1L) * STAGGER_MS : 0L);
@@ -66,32 +68,30 @@ public final class HardcoreHeartsFx {
         });
     }
 
-    private static volatile boolean hudAttached = false;
-
     public static void ensureAttached() {
         if (hudAttached) return;
         hudAttached = true;
         HudElementRegistry.attachElementBefore(VanillaHudElements.CHAT, HUD_ID, HardcoreHeartsFx::render);
     }
 
-    private static void render(DrawContext ctx, RenderTickCounter tickCounter) {
+    private static void render(GuiGraphicsExtractor ctx, DeltaTracker tickCounter) {
         if (!active) return;
 
-        var mc = MinecraftClient.getInstance();
+        var mc = Minecraft.getInstance();
         var p = mc != null ? mc.player : null;
         if (p == null) return;
 
-        final int sw = mc.getWindow().getScaledWidth();
-        final int sh = mc.getWindow().getScaledHeight();
+        final int sw = mc.getWindow().getGuiScaledWidth();
+        final int sh = mc.getWindow().getGuiScaledHeight();
         final int baseX = sw / 2 - 91;
         final int baseY = sh - 39;
 
         float hp = p.getHealth();
-        int heartsToDraw = Math.max(1, MathHelper.ceil(hp / 2f));
-        int fullHearts   = MathHelper.floor(hp / 2f);
+        int heartsToDraw = Math.max(1, Mth.ceil(hp / 2f));
+        int fullHearts   = Mth.floor(hp / 2f);
         boolean half     = (hp % 2f) >= 1f;
 
-        long now = Util.getMeasuringTimeMs();
+        long now = Util.getMillis();
 
         for (int i = 0; i < heartsToDraw; i++) {
             int order = REVERSE ? (heartsToDraw - 1 - i) : i;
@@ -104,7 +104,7 @@ public final class HardcoreHeartsFx {
             boolean isHalf = (i == fullHearts) && half;
 
             long heartStart = startMs + (long) order * STAGGER_MS;
-            float localT = MathHelper.clamp((now - heartStart) / (float) FADE_MS, 0f, 1f);
+            float localT = Mth.clamp((now - heartStart) / (float) FADE_MS, 0f, 1f);
             float smooth = easeInOutCubic(localT);
 
             float alphaHC = 1f - smooth;
@@ -116,44 +116,40 @@ public final class HardcoreHeartsFx {
             } else {
                 scaleNR = punchLate(localT, LATE_WINDOW, LATE_AMP);
                 if (!popPlayed.get(order) && localT >= 1f - LATE_WINDOW) {
-                    p.playSound(SoundEvents.BLOCK_BUBBLE_COLUMN_BUBBLE_POP, 0.7f, 1.10f);
+                    p.playSound(SoundEvents.BUBBLE_COLUMN_BUBBLE_POP, 0.7f, 1.10f);
                     popPlayed.set(order);
                 }
             }
 
-            if (alphaHC > 0f) {
-                drawHeart(ctx, x, y, isHalf, true,  alphaHC, scaleHC);
-            }
-            if (alphaNR > 0f) {
-                drawHeart(ctx, x, y, isHalf, false, alphaNR, scaleNR);
-            }
+            if (alphaHC > 0f) drawHeart(ctx, x, y, isHalf, true,  alphaHC, scaleHC);
+            if (alphaNR > 0f) drawHeart(ctx, x, y, isHalf, false, alphaNR, scaleNR);
         }
 
         if (now >= finishAtMs) {
             active = false;
             startMs = -1L;
 
-            var m = MinecraftClient.getInstance();
-            if (m != null && m.world != null) {
-                var props = m.world.getLevelProperties();
+            var m = Minecraft.getInstance();
+            if (m != null && m.level != null) {
+                var props = m.level.getLevelData();
                 ((com.enotiksergo.hardcorerevive.duck.ClientWorldHardcoreDuck) props)
                         .hardcorerevive$setHardcore(false);
             }
         }
     }
 
-    private static void drawHeart(DrawContext ctx, int x, int y, boolean half, boolean hardcore, float alpha, float scale) {
+    private static void drawHeart(GuiGraphicsExtractor ctx, int x, int y, boolean half, boolean hardcore, float alpha, float scale) {
         final Identifier tex = hardcore
                 ? (half ? TEX_HC_HALF : TEX_HC_FULL)
                 : (half ? TEX_HALF    : TEX_FULL);
 
-        final int a = MathHelper.clamp(Math.round(alpha * 255f), 0, 255);
-        final int argb = ColorHelper.withAlpha(a, 0xFFFFFF);
+        final int a    = Mth.clamp(Math.round(alpha * 255f), 0, 255);
+        final int argb = ARGB.color(a, 0xFFFFFF);
 
         final float cx = x + 4.5f;
         final float cy = y + 4.5f;
 
-        var m = ctx.getMatrices();
+        var m = ctx.pose();
         boolean doScale = Math.abs(scale - 1f) > 1e-4f;
         if (doScale) {
             m.pushMatrix();
@@ -162,7 +158,7 @@ public final class HardcoreHeartsFx {
             m.translate(-cx, -cy);
         }
 
-        ctx.drawTexture(
+        ctx.blit(
                 RenderPipelines.GUI_TEXTURED,
                 tex,
                 x, y,

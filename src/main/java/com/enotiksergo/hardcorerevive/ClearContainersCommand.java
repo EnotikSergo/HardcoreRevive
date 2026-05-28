@@ -1,61 +1,58 @@
 package com.enotiksergo.hardcorerevive;
 
 import com.mojang.brigadier.CommandDispatcher;
-import net.minecraft.server.command.CommandManager;
-import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.text.Text;
+import net.minecraft.commands.Commands;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.network.chat.Component;
 
 import java.util.function.IntSupplier;
 
 public class ClearContainersCommand {
-    public static void register(CommandDispatcher<ServerCommandSource> dispatcher) {
-        dispatcher.register(CommandManager.literal("clearcontainers")
-                .requires(source -> source.hasPermissionLevel(0))
+    public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
+        dispatcher.register(Commands.literal("clearcontainers")
                 .executes(ctx -> {
-                    ServerCommandSource source = ctx.getSource();
-                    ServerWorld world = source.getWorld();
+                    CommandSourceStack source = ctx.getSource();
+                    ServerLevel world = source.getLevel();
 
-                    source.sendFeedback(() -> Text.translatable("hardcorerevive.chat.clear.start"), false);
+                    source.sendSuccess(() -> Component.translatable("hardcorerevive.chat.clear.start"), false);
                     ContainerCleaner.clearContainersInWorld(world, source);
                     return 1;
                 }));
-        dispatcher.register(CommandManager.literal("clearregion")
-                .requires(source -> source.hasPermissionLevel(0))
-
+        dispatcher.register(Commands.literal("clearregion")
                 .executes(ctx -> guarded(ctx.getSource(),
                         () -> execClear(ctx.getSource(), true, Scope.CURRENT)))
 
-                .then(CommandManager.literal("on")
+                .then(Commands.literal("on")
                         .executes(ctx -> guarded(ctx.getSource(),
                                 () -> execClear(ctx.getSource(), true, Scope.CURRENT)))
-                        .then(CommandManager.literal("current")
+                        .then(Commands.literal("current")
                                 .executes(ctx -> guarded(ctx.getSource(),
                                         () -> execClear(ctx.getSource(), true, Scope.CURRENT))))
-                        .then(CommandManager.literal("all")
+                        .then(Commands.literal("all")
                                 .executes(ctx -> guarded(ctx.getSource(),
                                         () -> execClear(ctx.getSource(), true, Scope.ALL))))
                 )
 
-                .then(CommandManager.literal("off")
+                .then(Commands.literal("off")
                         .executes(ctx -> guarded(ctx.getSource(),
                                 () -> execClear(ctx.getSource(), false, Scope.CURRENT)))
-                        .then(CommandManager.literal("current")
+                        .then(Commands.literal("current")
                                 .executes(ctx -> guarded(ctx.getSource(),
                                         () -> execClear(ctx.getSource(), false, Scope.CURRENT))))
-                        .then(CommandManager.literal("all")
+                        .then(Commands.literal("all")
                                 .executes(ctx -> guarded(ctx.getSource(),
                                         () -> execClear(ctx.getSource(), false, Scope.ALL))))
                 )
 
-                .then(CommandManager.literal("confirm")
+                .then(Commands.literal("confirm")
                         .executes(ctx -> {
-                            ServerCommandSource src = ctx.getSource();
+                            CommandSourceStack src = ctx.getSource();
                             var server = ctx.getSource().getServer();
-                            for (ServerWorld w : server.getWorlds()) {
+                            for (ServerLevel w : server.getAllLevels()) {
                                 ClearRegionConfirm.confirm(w);
                             }
-                            src.sendFeedback(() -> Text.translatable("hardcorerevive.chat.confirm"),true);
+                            src.sendSuccess(() -> Component.translatable("hardcorerevive.chat.confirm"),true);
                             return 1;
                         })
                 )
@@ -63,20 +60,20 @@ public class ClearContainersCommand {
     }
     private enum Scope { CURRENT, ALL }
 
-    private static int execClear(ServerCommandSource source, boolean showBossbar, Scope scope) {
-        source.sendFeedback(() -> Text.translatable("hardcorerevive.chat.clear.start"), false);
+    private static int execClear(CommandSourceStack source, boolean showBossbar, Scope scope) {
+        source.sendSuccess(() -> Component.translatable("hardcorerevive.chat.clear.start"), false);
 
         if (scope == Scope.ALL) {
             RegionContainerCleaner.clearAllDimensions(source, showBossbar);
         } else {
-            ServerWorld world = source.getWorld();
+            ServerLevel world = source.getLevel();
             RegionContainerCleaner.clearAllContainers(world, source, showBossbar);
         }
         return 1;
     }
 
-    private static int guarded(ServerCommandSource src, IntSupplier action) {
-        ServerWorld world = src.getWorld();
+    private static int guarded(CommandSourceStack src, IntSupplier action) {
+        ServerLevel world = src.getLevel();
         if (!ClearRegionConfirm.isConfirmed(world)) {
             ClearRegionConfirm.warnBackup(src);
             return 0;

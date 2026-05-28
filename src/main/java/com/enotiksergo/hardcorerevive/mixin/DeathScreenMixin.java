@@ -1,12 +1,13 @@
 package com.enotiksergo.hardcorerevive.mixin;
 
 import com.enotiksergo.hardcorerevive.client.ClientTerrainWaiter;
+import com.enotiksergo.hardcorerevive.duck.ScreenExt;
 import com.enotiksergo.hardcorerevive.net.ReviveNetworking;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.DeathScreen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.text.Text;
-import net.minecraft.text.TranslatableTextContent;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.DeathScreen;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -16,33 +17,33 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(DeathScreen.class)
 public class DeathScreenMixin {
 
-    @Unique private ButtonWidget hardcorerevive$reviveButton;
-    @Unique private ButtonWidget hardcorerevive$titleButton;
-    @Unique private int          hardcorerevive$fallbackTicks;
+    @Unique private Button hardcorerevive$reviveButton;
+    @Unique private Button hardcorerevive$titleButton;
+    @Unique private int hardcorerevive$fallbackTicks;
 
-    @Inject(method = "init", at = @At("TAIL"))
+    @Inject(method = "init", at = @At("TAIL"), remap = false)
     private void addRespawnButton(CallbackInfo ci) {
         DeathScreen screen = (DeathScreen) (Object) this;
-        ScreenAccessor screenAccessor = (ScreenAccessor) screen;
+        ScreenExt screenAccessor = (ScreenExt) screen;
 
         try {
-            var client = MinecraftClient.getInstance();
+            var client = Minecraft.getInstance();
 
-            if (client != null && client.world != null && client.getServer() != null) {
+            if (client != null && client.level != null && client.getSingleplayerServer() != null) {
 
-                var server = client.getServer();
-                var world = server.getWorld(client.world.getRegistryKey());
+                var server = client.getSingleplayerServer();
+                var world = server.getLevel(client.level.dimension());
 
                 if (world != null) {
-                    var levelProperties = world.getLevelProperties();
+                    var levelProperties = world.getLevelData();
                     boolean isHardcore = levelProperties.isHardcore();
 
                     if (isHardcore) {
                         int buttonY = screen.height / 4 + 144;
-                        ButtonWidget spectateButton = null;
+                        Button spectateButton = null;
 
-                        for (var drawable : screenAccessor.getDrawables()) {
-                            if (drawable instanceof ButtonWidget button) {
+                        for (var drawable : screenAccessor.getRenderables()) {
+                            if (drawable instanceof Button button) {
                                 var msg = button.getMessage();
                                 if (hardcorerevive$isSpectate(msg)) {
                                     spectateButton = button;
@@ -54,27 +55,27 @@ public class DeathScreenMixin {
 
                         if (spectateButton != null) {
                             buttonY = spectateButton.getY();
-                            screenAccessor.getDrawables().remove(spectateButton);
+                            screenAccessor.getRenderables().remove(spectateButton);
                             screenAccessor.getChildren().remove(spectateButton);
                         }
 
-                        hardcorerevive$reviveButton = ButtonWidget.builder(
-                                Text.translatable("hardcorerevive.button.revive"),
+                        hardcorerevive$reviveButton = Button.builder(
+                                Component.translatable("hardcorerevive.button.revive"),
                                 button -> {
                                     if (client != null && client.player != null) {
                                         if (server == null) return;
-                                        client.player.requestRespawn();
+                                        client.player.respawn();
                                         client.setScreen(null);
                                         ReviveNetworking.sendReviveRequest();
                                         ClientTerrainWaiter.startWaiting();
                                     }
                                 }
-                        ).dimensions(screen.width / 2 - 100, buttonY, 200, 20).build();
+                        ).bounds(screen.width / 2 - 100, buttonY, 200, 20).build();
 
                         hardcorerevive$reviveButton.active =
                                 hardcorerevive$titleButton != null && hardcorerevive$titleButton.active;
 
-                        screenAccessor.invokeAddDrawableChild(hardcorerevive$reviveButton);
+                        screenAccessor.invokeAddRenderableWidget(hardcorerevive$reviveButton);
                         hardcorerevive$fallbackTicks = 0;
                     }
                 }
@@ -98,20 +99,20 @@ public class DeathScreenMixin {
     }
 
     @Unique
-    private static boolean hardcorerevive$isSpectate(Text t) {
+    private static boolean hardcorerevive$isSpectate(Component t) {
         return hardcorerevive$hasKey(t, "deathScreen.spectate");
     }
 
     @Unique
-    private static boolean hardcorerevive$isTitle(Text t) {
+    private static boolean hardcorerevive$isTitle(Component t) {
         return hardcorerevive$hasKey(t, "deathScreen.titleScreen")
                 || hardcorerevive$hasKey(t, "deathScreen.leaveServer")
                 || hardcorerevive$hasKey(t, "gui.toTitle");
     }
 
     @Unique
-    private static boolean hardcorerevive$hasKey(Text t, String key) {
-        if (t.getContent() instanceof TranslatableTextContent tc) {
+    private static boolean hardcorerevive$hasKey(Component t, String key) {
+        if (t.getContents() instanceof TranslatableContents tc) {
             return key.equals(tc.getKey());
         }
         return false;

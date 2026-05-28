@@ -5,16 +5,16 @@ import com.enotiksergo.hardcorerevive.net.ReviveNetworking;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.GlobalPos;
-import net.minecraft.world.Heightmap;
-import net.minecraft.world.WorldProperties;
-import net.minecraft.world.chunk.ChunkStatus;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.GlobalPos;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.storage.LevelData;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 import java.util.*;
 
 public class HardcoreReviveMod implements ModInitializer {
@@ -28,21 +28,21 @@ public class HardcoreReviveMod implements ModInitializer {
 		});
 
 		ServerLivingEntityEvents.AFTER_DEATH.register((entity, damageSource) -> {
-			if (entity instanceof PlayerEntity player) {
-				ServerWorld deathWorld = (ServerWorld) player.getEntityWorld();
+			if (entity instanceof Player player) {
+				ServerLevel deathWorld = (ServerLevel) player.level();
 				MinecraftServer server = deathWorld.getServer();
 
 				if (server.isHardcore()) {
 					// Очистка выпавших вещей рядом с местом смерти
-					List<ItemEntity> droppedItems = deathWorld.getEntitiesByClass(ItemEntity.class, player.getBoundingBox().expand(20.0), item -> true);
+					List<ItemEntity> droppedItems = deathWorld.getEntitiesOfClass(ItemEntity.class, player.getBoundingBox().inflate(20.0), item -> true);
 					for (ItemEntity item : droppedItems) {
 						item.discard();
 					}
 
 					// Очистка эндер-сундука
-					player.getEnderChestInventory().clear();
+					player.getEnderChestInventory().clearContent();
 
-					ServerWorld overworld = server.getOverworld();
+					ServerLevel overworld = server.overworld();
 					if (overworld == null) return;
 
 					// Новые координаты спавна
@@ -50,19 +50,19 @@ public class HardcoreReviveMod implements ModInitializer {
 					int x = random.nextInt(TELEPORT_RADIUS * 2) - TELEPORT_RADIUS;
 					int z = random.nextInt(TELEPORT_RADIUS * 2) - TELEPORT_RADIUS;
 
-					overworld.getChunkManager().getChunk(x >> 4, z >> 4, ChunkStatus.FULL, true);
-					int y = overworld.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, new BlockPos(x, 0, z));
+					overworld.getChunkSource().getChunk(x >> 4, z >> 4, ChunkStatus.FULL, true);
+					int y = overworld.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, new BlockPos(x, 0, z));
 					BlockPos pos = new BlockPos(x, y, z);
 
-					WorldProperties.SpawnPoint spawnpoint =
-							new WorldProperties.SpawnPoint(new GlobalPos(overworld.getRegistryKey(), pos),
-									player.getYaw(), player.getPitch());
+					LevelData.RespawnData spawnpoint =
+							new LevelData.RespawnData(new GlobalPos(overworld.dimension(), pos),
+									player.getYRot(), player.getXRot());
 
-					overworld.setSpawnPoint(spawnpoint);
+					overworld.setRespawnData(spawnpoint);
 
-					ServerPlayerEntity newPlayer = server.getPlayerManager().getPlayer(player.getUuid());
+					ServerPlayer newPlayer = server.getPlayerList().getPlayer(player.getUUID());
 					if (newPlayer != null) {
-						newPlayer.setSpawnPoint(new ServerPlayerEntity.Respawn(spawnpoint, true), false);
+						newPlayer.setRespawnPosition(new ServerPlayer.RespawnConfig(spawnpoint, true), false);
 					}
 				}
 			}

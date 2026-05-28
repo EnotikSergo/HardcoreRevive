@@ -2,7 +2,7 @@ package com.enotiksergo.hardcorerevive.client;
 
 import com.enotiksergo.hardcorerevive.net.ReviveNetworking;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.minecraft.util.math.ChunkPos;
+import net.minecraft.world.level.ChunkPos;
 
 public final class ClientTerrainWaiter {
     private static boolean waiting = false;
@@ -12,16 +12,16 @@ public final class ClientTerrainWaiter {
     public static void register() {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (!waiting) return;
-            if (client.player == null || client.world == null) return;
+            if (client.player == null || client.level == null) return;
 
             if (graceTicks > 0) { graceTicks--; return; }
 
-            boolean screenReady = (client.currentScreen == null);
+            boolean screenReady = (client.screen == null);
 
-            ChunkPos pos = new ChunkPos(client.player.getBlockPos());
+            ChunkPos pos = ChunkPos.containing(client.player.blockPosition());
             boolean chunkReady;
             try {
-                chunkReady = client.world.getChunkManager().isChunkLoaded(pos.x, pos.z);
+                chunkReady = client.level.getChunkSource().hasChunk(pos.x(), pos.z());
             } catch (Throwable t) {
                 chunkReady = false;
             }

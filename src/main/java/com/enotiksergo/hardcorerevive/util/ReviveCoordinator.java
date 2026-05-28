@@ -1,11 +1,11 @@
 package com.enotiksergo.hardcorerevive.util;
 
-import net.minecraft.registry.RegistryKey;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.server.world.ChunkTicketType;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.World;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.TicketType;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
 
 import java.util.Map;
 import java.util.Set;
@@ -22,17 +22,17 @@ public final class ReviveCoordinator {
     public static void markWaiting(UUID id) { WAITING.add(id); }
     public static boolean consumeWaiting(UUID id) { return WAITING.remove(id); }
 
-    public static void addPreload(ServerWorld world, ChunkPos pos, UUID id) {
-        var prev = BY_PLAYER.put(id, new TicketInfo(world.getRegistryKey(), pos));
+    public static void addPreload(ServerLevel world, ChunkPos pos, UUID id) {
+        var prev = BY_PLAYER.put(id, new TicketInfo(world.dimension(), pos));
         if (prev != null) {
             removePreload(world.getServer(), id, prev);
         }
 
-        var cm = world.getChunkManager();
-        var key = new PosKey(world.getRegistryKey(), pos);
+        var cm = world.getChunkSource();
+        var key = new PosKey(world.dimension(), pos);
         int count = COUNTS.computeIfAbsent(key, k -> new AtomicInteger()).incrementAndGet();
         if (count == 1) {
-            cm.addTicket(ChunkTicketType.FORCED, pos, REVIVE_RADIUS);
+            cm.addTicketWithRadius(TicketType.FORCED, pos, REVIVE_RADIUS);
         }
     }
 
@@ -42,7 +42,7 @@ public final class ReviveCoordinator {
     }
 
     private static void removePreload(MinecraftServer server, UUID id, TicketInfo info) {
-        ServerWorld world = server.getWorld(info.worldKey());
+        ServerLevel world = server.getLevel(info.worldKey());
         if (world == null) return;
 
         var key = new PosKey(info.worldKey(), info.pos());
@@ -52,13 +52,13 @@ public final class ReviveCoordinator {
         int left = counter.decrementAndGet();
         if (left <= 0) {
             COUNTS.remove(key);
-            world.getChunkManager().removeTicket(ChunkTicketType.FORCED, info.pos(), REVIVE_RADIUS);
+            world.getChunkSource().removeTicketWithRadius(TicketType.FORCED, info.pos(), REVIVE_RADIUS);
         }
     }
 
-    private record TicketInfo(RegistryKey<World> worldKey, ChunkPos pos) {}
+    private record TicketInfo(ResourceKey<Level> worldKey, ChunkPos pos) {}
 
-    private record PosKey(RegistryKey<World> worldKey, ChunkPos pos) {
+    private record PosKey(ResourceKey<Level> worldKey, ChunkPos pos) {
     }
 
     private ReviveCoordinator() {}
